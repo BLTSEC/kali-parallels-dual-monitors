@@ -1,0 +1,102 @@
+#!/bin/bash
+set -euo pipefail
+
+PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export PATH
+
+# Screen ids are hardware-specific, so profiles live on this machine only.
+PROFILE_DIR="${DISPLAY_PROFILE_DIR:-$HOME/.config/display-profiles}"
+DISPLAYPLACER="${DISPLAYPLACER:-displayplacer}"
+# virtio-gpu caps the Parallels ARM guest's X11 framebuffer at 8192 wide.
+GUEST_MAX_WIDTH=8192
+
+usage() {
+  cat <<'EOF'
+Usage: display-profile <save|apply|check|list> [name]
+
+  save NAME   Capture the current display layout as profile NAME.
+  apply NAME  Restore profile NAME.
+  check NAME  Show the width a Parallels guest gets in full screen.
+  list        List saved profiles.
+
+Arrange the displays in System Settings first, then save. Profiles are
+stored one screen per line in ~/.config/display-profiles/NAME.
+EOF
+}
+
+die() {
+  echo "display-profile: $*" >&2
+  exit 1
+}
+
+profile_path() {
+  [[ "$1" =~ ^[A-Za-z0-9_-]+$ ]] || die "invalid profile name: $1"
+  printf '%s/%s\n' "$PROFILE_DIR" "$1"
+}
+
+# Sum of each screen's backing width: HiDPI ("scaling:on") modes are 2x.
+guest_width() {
+  awk '{
+    w = 0; s = 1
+    for (i = 1; i <= NF; i++) {
+      if ($i ~ /^res:[0-9]+x[0-9]+$/) { split(substr($i, 5), r, "x"); w = r[1] }
+      if ($i == "scaling:on") s = 2
+    }
+    total += w * s
+  } END { print total + 0 }' "$1"
+}
+
+check() {
+  local width
+  width="$(guest_width "$1")"
+  if [ "$width" -gt "$GUEST_MAX_WIDTH" ]; then
+    echo "Guest width $width > $GUEST_MAX_WIDTH: Kali full screen will go black"
+  else
+    echo "Guest width $width <= $GUEST_MAX_WIDTH: OK for Kali full screen"
+  fi
+}
+
+case "${1:-}" in
+  save)
+    [ $# -eq 2 ] || { usage >&2; exit 2; }
+    command -v "$DISPLAYPLACER" >/dev/null || die "displayplacer not found (brew install displayplacer)"
+    file="$(profile_path "$2")"
+    # The last line of `displayplacer list` restores the current layout:
+    # displayplacer "id:... res:..." "id:... res:..."
+    line="$("$DISPLAYPLACER" list | tail -n 1)"
+    [[ "$line" == displayplacer\ \"id:* ]] || die "unexpected displayplacer output: $line"
+    mkdir -p "$PROFILE_DIR"
+    grep -o '"[^"]*"' <<<"$line" | tr -d '"' >"$file"
+    echo "Saved '$2' ($(wc -l <"$file" | tr -d ' ') screens) to $file"
+    check "$file"
+    ;;
+  apply)
+    [ $# -eq 2 ] || { usage >&2; exit 2; }
+    command -v "$DISPLAYPLACER" >/dev/null || die "displayplacer not found (brew install displayplacer)"
+    file="$(profile_path "$2")"
+    [ -f "$file" ] || die "no profile '$2' (run: display-profile save $2)"
+    screens=()
+    while IFS= read -r screen; do
+      [ -n "$screen" ] && screens+=("$screen")
+    done <"$file"
+    [ ${#screens[@]} -gt 0 ] || die "profile '$2' is empty"
+    "$DISPLAYPLACER" "${screens[@]}"
+    echo "Display profile: $2"
+    ;;
+  check)
+    [ $# -eq 2 ] || { usage >&2; exit 2; }
+    file="$(profile_path "$2")"
+    [ -f "$file" ] || die "no profile '$2'"
+    check "$file"
+    ;;
+  list)
+    [ -d "$PROFILE_DIR" ] && ls -1 "$PROFILE_DIR"
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac
