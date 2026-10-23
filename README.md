@@ -6,6 +6,8 @@ Fixes black screens when Kali on Parallels Desktop goes full screen across two 4
 
 Write-up: [Fixing Kali Dual Monitors on Parallels for macOS](https://bltsec.com/blog/kali-parallels-dual-monitors/)
 
+On VMware Workstation instead? Mirrored screens and offset clicks there are a different problem: see [kali-vmware-dual-monitors](https://github.com/BLTSEC/kali-vmware-dual-monitors).
+
 ## Why
 
 - Under X11, every monitor shares one framebuffer. On the Parallels ARM guest, `virtio-gpu` caps it at **8192** wide (`xrandr` shows `maximum 8192 x 8192`).
